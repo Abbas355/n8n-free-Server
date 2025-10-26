@@ -1,0 +1,115 @@
+version: '3.8'
+
+# ============================================
+# Client A - n8n Instance
+# ============================================
+
+services:
+  # n8n instance for Client A
+  n8n-client-a:
+    image: n8nio/n8n:latest
+    container_name: n8n-client-a
+    restart: unless-stopped
+    ports:
+      - "5678:5678"  # Expose on port 5678
+    environment:
+      # Basic Configuration
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      
+      # Database Configuration (PostgreSQL)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-client-a
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_client_a
+      - DB_POSTGRESDB_USER=client_a_user
+      - DB_POSTGRESDB_PASSWORD=client_a_password_123
+      
+      # Security
+      - N8N_ENCRYPTION_KEY=client_a_encryption_key_abcdef123456
+      
+      # Webhook Configuration
+      - WEBHOOK_URL=http://localhost:5678/
+      
+      # Execution Mode (queue-based with Redis)
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis-client-a
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_DB=0
+      
+      # Paths
+      - N8N_USER_FOLDER=/home/node/.n8n
+      
+      # Timezone
+      - GENERIC_TIMEZONE=America/New_York
+      - TZ=America/New_York
+      
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      
+    volumes:
+      # Persistent data for Client A
+      - ./client-data/client-a/n8n:/home/node/.n8n
+      - ./client-data/client-a/custom-nodes:/home/node/.n8n/custom
+    networks:
+      - client-a-network
+    depends_on:
+      postgres-client-a:
+        condition: service_healthy
+      redis-client-a:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # PostgreSQL Database for Client A
+  postgres-client-a:
+    image: postgres:16-alpine
+    container_name: postgres-client-a
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=client_a_user
+      - POSTGRES_PASSWORD=client_a_password_123
+      - POSTGRES_DB=n8n_client_a
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./client-data/client-a/postgres:/var/lib/postgresql/data
+    networks:
+      - client-a-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U client_a_user -d n8n_client_a"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Queue Management (Client A)
+  redis-client-a:
+    image: redis:7-alpine
+    container_name: redis-client-a
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - ./client-data/client-a/redis:/data
+    networks:
+      - client-a-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  client-a-network:
+    driver: bridge
+    name: client-a-network
+
+volumes:
+  client-a-n8n-data:
+  client-a-postgres-data:
+  client-a-redis-data:
+

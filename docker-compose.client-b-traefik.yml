@@ -1,0 +1,85 @@
+version: '3.8'
+
+# ============================================
+# Client B with Traefik Integration
+# Uses subdomain: client-b.yourdomain.com
+# NO port mapping needed!
+# ============================================
+
+services:
+  n8n-client-b:
+    image: n8nio/n8n:latest
+    container_name: n8n-client-b
+    restart: unless-stopped
+    # ⚠️ NO PORTS! Traefik handles routing
+    environment:
+      - N8N_HOST=client-b.yourdomain.com
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://client-b.yourdomain.com/
+      
+      # Database (DIFFERENT)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-client-b
+      - DB_POSTGRESDB_DATABASE=n8n_client_b
+      - DB_POSTGRESDB_USER=client_b_user
+      - DB_POSTGRESDB_PASSWORD=client_b_password_456
+      - N8N_ENCRYPTION_KEY=client_b_encryption_key_xyz789
+      
+      # Queue
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis-client-b
+    
+    volumes:
+      - ./client-data/client-b/n8n:/home/node/.n8n
+    
+    networks:
+      - n8n-proxy          # Connect to Traefik
+      - client-b-internal  # Internal network
+    
+    depends_on:
+      - postgres-client-b
+      - redis-client-b
+    
+    labels:
+      - "traefik.enable=true"
+      
+      # HTTP Router (DIFFERENT SUBDOMAIN)
+      - "traefik.http.routers.n8n-client-b.rule=Host(`client-b.yourdomain.com`)"
+      - "traefik.http.routers.n8n-client-b.entrypoints=websecure"
+      - "traefik.http.routers.n8n-client-b.tls.certresolver=letsencrypt"
+      
+      # Service
+      - "traefik.http.services.n8n-client-b.loadbalancer.server.port=5678"
+      
+      # Network
+      - "traefik.docker.network=n8n-proxy"
+
+  postgres-client-b:
+    image: postgres:16-alpine
+    container_name: postgres-client-b
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=client_b_user
+      - POSTGRES_PASSWORD=client_b_password_456
+      - POSTGRES_DB=n8n_client_b
+    volumes:
+      - ./client-data/client-b/postgres:/var/lib/postgresql/data
+    networks:
+      - client-b-internal
+
+  redis-client-b:
+    image: redis:7-alpine
+    container_name: redis-client-b
+    restart: unless-stopped
+    volumes:
+      - ./client-data/client-b/redis:/data
+    networks:
+      - client-b-internal
+
+networks:
+  n8n-proxy:
+    external: true
+  client-b-internal:
+    driver: bridge
+

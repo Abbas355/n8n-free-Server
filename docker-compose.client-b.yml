@@ -1,0 +1,115 @@
+version: '3.8'
+
+# ============================================
+# Client B - n8n Instance (SECOND INSTANCE)
+# ============================================
+
+services:
+  # n8n instance for Client B
+  n8n-client-b:
+    image: n8nio/n8n:latest
+    container_name: n8n-client-b
+    restart: unless-stopped
+    ports:
+      - "5679:5678"  # Expose on DIFFERENT port: 5679
+    environment:
+      # Basic Configuration
+      - N8N_HOST=localhost
+      - N8N_PORT=5678  # Internal port (same)
+      - N8N_PROTOCOL=http
+      
+      # Database Configuration (PostgreSQL) - DIFFERENT DATABASE
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-client-b
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_client_b
+      - DB_POSTGRESDB_USER=client_b_user
+      - DB_POSTGRESDB_PASSWORD=client_b_password_456
+      
+      # Security - DIFFERENT ENCRYPTION KEY
+      - N8N_ENCRYPTION_KEY=client_b_encryption_key_xyz789
+      
+      # Webhook Configuration
+      - WEBHOOK_URL=http://localhost:5679/
+      
+      # Execution Mode (queue-based with Redis)
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=redis-client-b
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_DB=0
+      
+      # Paths
+      - N8N_USER_FOLDER=/home/node/.n8n
+      
+      # Timezone
+      - GENERIC_TIMEZONE=America/New_York
+      - TZ=America/New_York
+      
+      # Logging
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console
+      
+    volumes:
+      # SEPARATE data folder for Client B
+      - ./client-data/client-b/n8n:/home/node/.n8n
+      - ./client-data/client-b/custom-nodes:/home/node/.n8n/custom
+    networks:
+      - client-b-network
+    depends_on:
+      postgres-client-b:
+        condition: service_healthy
+      redis-client-b:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # PostgreSQL Database for Client B - SEPARATE DATABASE
+  postgres-client-b:
+    image: postgres:16-alpine
+    container_name: postgres-client-b
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=client_b_user
+      - POSTGRES_PASSWORD=client_b_password_456
+      - POSTGRES_DB=n8n_client_b
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./client-data/client-b/postgres:/var/lib/postgresql/data
+    networks:
+      - client-b-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U client_b_user -d n8n_client_b"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Queue Management (Client B) - SEPARATE REDIS
+  redis-client-b:
+    image: redis:7-alpine
+    container_name: redis-client-b
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - ./client-data/client-b/redis:/data
+    networks:
+      - client-b-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  client-b-network:
+    driver: bridge
+    name: client-b-network
+
+volumes:
+  client-b-n8n-data:
+  client-b-postgres-data:
+  client-b-redis-data:
+
