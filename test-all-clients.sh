@@ -85,10 +85,29 @@ for CLIENT_DIR in clients/*/; do
             test_result 0 "$CLIENT_ID: PostgreSQL healthy" || \
             test_result 1 "$CLIENT_ID: PostgreSQL unhealthy"
         
-        # Redis health
-        docker exec redis-${CLIENT_ID} redis-cli ping &>/dev/null | grep -q "PONG" && \
-            test_result 0 "$CLIENT_ID: Redis healthy" || \
+        # Redis health (with retry for startup)
+        REDIS_HEALTHY=false
+        for retry in {1..3}; do
+            if docker exec redis-${CLIENT_ID} redis-cli ping &>/dev/null | grep -q "PONG"; then
+                REDIS_HEALTHY=true
+                break
+            fi
+            sleep 1
+        done
+        if [ "$REDIS_HEALTHY" = true ]; then
+            test_result 0 "$CLIENT_ID: Redis healthy"
+        else
             test_result 1 "$CLIENT_ID: Redis unhealthy"
+        fi
+        
+        # Internal network connectivity
+        docker exec n8n-${CLIENT_ID} ping -c 1 postgres &>/dev/null && \
+            test_result 0 "$CLIENT_ID: n8n can reach postgres" || \
+            test_result 1 "$CLIENT_ID: n8n cannot reach postgres"
+        
+        docker exec n8n-${CLIENT_ID} ping -c 1 redis &>/dev/null && \
+            test_result 0 "$CLIENT_ID: n8n can reach redis" || \
+            test_result 1 "$CLIENT_ID: n8n cannot reach redis"
         
         # n8n health
         docker exec n8n-${CLIENT_ID} wget -q -O- http://localhost:5678/healthz 2>/dev/null | grep -q "ok" && \
@@ -130,6 +149,45 @@ if [ "$DISK_USAGE" -lt 80 ]; then
     test_result 0 "Disk usage is healthy (${DISK_USAGE}% used)"
 else
     test_result 1 "Disk usage is high (${DISK_USAGE}% used) - consider cleanup"
+fi
+
+# Test 6: Traefik Routing Verification
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test 6: Traefik Routing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if docker ps | grep -q traefik; then
+    TRAEFIK_ROUTING_OK=true
+    for CLIENT_DIR in clients/*/; do
+        if [ -d "$CLIENT_DIR" ]; then
+            CLIENT_ID=$(basename "$CLIENT_DIR")
+            if docker ps --format "{{.Names}}" | grep -q "^n8n-${CLIENT_ID}$"; then
+                # Check if Traefik can see the container
+                if docker network inspect n8n-proxy 2>/dev/null | grep -q "n8n-${CLIENT_ID}"; then
+                    test_result 0 "$CLIENT_ID: Traefik routing configured"
+                else
+                    test_result 1 "$CLIENT_ID: Not configured in Traefik"
+                    TRAEFIK_ROUTING_OK=false
+                fi
+            fi
+        fi
+    done
+else
+    test_result 1 "Traefik not running, cannot verify routing"
+fi
+
+# Test 7: Resource Usage Monitoring
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test 7: Resource Usage"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+MEM_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+if [ "$MEM_USAGE" -lt 85 ]; then
+    test_result 0 "Memory usage acceptable (${MEM_USAGE}% used)"
+else
+    test_result 1 "Memory usage high (${MEM_USAGE}% used)"
 fi
 
 # Summary

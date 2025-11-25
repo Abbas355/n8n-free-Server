@@ -136,10 +136,10 @@ for CLIENT_ID in "${EXISTING_CLIENTS[@]}"; do
     fi
 done
 
-# Step 6: Check for container conflicts
+# Step 6: Check for container conflicts and network connectivity
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Step 6: Checking for resource conflicts..."
+echo "Step 6: Checking for resource conflicts and network connectivity..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Check for duplicate container names
@@ -156,6 +156,44 @@ if [ "$NETWORK_COUNT" -eq 1 ]; then
     echo "✅ No network conflicts"
 else
     echo "⚠️  Unexpected network count for test client"
+fi
+
+# Verify network connectivity
+if docker network inspect n8n-proxy 2>/dev/null | grep -q "n8n-${ACTUAL_CLIENT_ID}"; then
+    echo "✅ New client connected to n8n-proxy network"
+else
+    echo "❌ New client NOT connected to n8n-proxy network"
+fi
+
+# Verify internal network connectivity
+if docker exec n8n-${ACTUAL_CLIENT_ID} ping -c 1 postgres &>/dev/null 2>&1; then
+    echo "✅ n8n can reach postgres"
+else
+    echo "❌ n8n cannot reach postgres"
+fi
+
+if docker exec n8n-${ACTUAL_CLIENT_ID} ping -c 1 redis &>/dev/null 2>&1; then
+    echo "✅ n8n can reach redis"
+else
+    echo "❌ n8n cannot reach redis"
+fi
+
+# Verify Redis health
+if docker exec redis-${ACTUAL_CLIENT_ID} redis-cli ping 2>/dev/null | grep -q "PONG"; then
+    echo "✅ Redis is healthy"
+else
+    echo "⚠️  Redis health check failed"
+fi
+
+# Verify Traefik routing (if Traefik is running)
+if docker ps | grep -q traefik; then
+    echo "Checking Traefik routing..."
+    sleep 5  # Give Traefik time to discover
+    if docker network inspect n8n-proxy 2>/dev/null | grep -q "n8n-${ACTUAL_CLIENT_ID}"; then
+        echo "✅ Traefik routing configured"
+    else
+        echo "⚠️  Traefik routing may need more time"
+    fi
 fi
 
 # Step 7: Test Results Summary
